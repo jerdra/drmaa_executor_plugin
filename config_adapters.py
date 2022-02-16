@@ -103,6 +103,12 @@ class DRMAACompatible(ABC):
 
 
 @dataclass
+class DRMAAConfig(DRMAACompatible):
+    def drm2drmaa(self):
+        return
+
+
+@dataclass
 class SlurmConfig(DRMAACompatible):
     '''
     Transform SLURM resource specification into DRMAA-compliant inputs
