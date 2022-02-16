@@ -206,7 +206,8 @@ def _timestr_to_sec(timestr: str) -> int:
 
     days = 0
     if "-" in timestr:
-        days, timestr = timestr.split('-')
+        day_str, timestr = timestr.split('-')
+        days = int(day_str)
 
     seconds = (24 * days) * (60**2)
     for exp, unit in enumerate(reversed(timestr.split(":"))):

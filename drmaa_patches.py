@@ -21,7 +21,7 @@ class PatchedIntConverter():
         return value.to_bytes(8, byteorder="little")
 
     @staticmethod
-    def from_drmaa(value: int) -> bytes:
+    def from_drmaa(value: bytes) -> int:
         return int.from_bytes(value, byteorder="little")
 
 
