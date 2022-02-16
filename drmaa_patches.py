@@ -10,6 +10,11 @@ class PatchedIntConverter():
     '''
     Helper class to correctly encode Integer values
     as little-endian bytes for Python 3
+
+    Info:
+        The standard IntConverter class attempts to convert
+        integer values to bytes using `bytes(value)` which
+        results in a zero'd byte-array of length `value`.
     '''
     @staticmethod
     def to_drmaa(value: int) -> bytes:
@@ -23,7 +28,7 @@ class PatchedIntConverter():
 class PatchedJobTemplate(JobTemplate):
     def __init__(self):
         '''
-        Dynamically patch IntConverter attributes
+        Dynamically patch attributes using IntConverter
         '''
         super(PatchedJobTemplate, self).__init__()
         for attr, value in vars(JobTemplate).items():
