@@ -2,7 +2,8 @@ from __future__ import annotations
 import drmaa
 from drmaa_executor_plugin.drmaa_patches import PatchedSession as drmaaSession
 
-from typing import TYPE_CHECKING, Optional, TypedDict, Generator, Dict, cast
+from typing import (TYPE_CHECKING, Optional, TypedDict, Generator, Dict, cast,
+                    Callable, TypeVar, Any)
 
 from functools import wraps
 
@@ -37,22 +38,25 @@ _TaskInstanceKeyDict = TypedDict('_TaskInstanceKeyDict', {
 
 JobTrackingType = Dict[JobID, _TaskInstanceKeyDict]
 
+T = TypeVar("T")
 
-def check_started(method):
+
+def check_started(method: Callable[..., T]) -> Callable[..., T]:
     '''
     Check whether executor has been initialized with
-    drmaa.Session object
+    drmaaSession object
     '''
     @wraps(method)
     def _impl(self, *method_args, **method_kwargs):
         if self.session is None:
             raise AirflowException(NOT_STARTED_MESSAGE)
-        method(self, *method_args, **method_kwargs)
+
+        return method(self, *method_args, **method_kwargs)
 
     return _impl
 
 
-# TODO: Create JobTracker helper class
+# TODO: Create JobTracker helper class?
 class DRMAAV1Executor(BaseExecutor, LoggingMixin):
     """
     Submit jobs to an HPC cluster using the DRMAA v1 API
@@ -62,7 +66,7 @@ class DRMAAV1Executor(BaseExecutor, LoggingMixin):
 
         self.active_jobs: int = 0
         self.jobs_submitted: int = 0
-        self.session: Optional[drmaa.Session] = None
+        self.session: Optional[drmaaSession] = None
 
         # Not yet implemented
         self.max_concurrent_jobs: Optional[int] = max_concurrent_jobs

@@ -43,5 +43,5 @@ class PatchedSession(Session):
     Patched version
     '''
     @staticmethod
-    def createJobTemplate(self) -> PatchedJobTemplate:
+    def createJobTemplate() -> PatchedJobTemplate:
         return PatchedJobTemplate()
