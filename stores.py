@@ -3,7 +3,7 @@ Back-end stores for tracking persistent active job state
 for DRMAA Executor
 '''
 
-from typing import TYPE_CHECKING, Dict, Optional
+from typing import TYPE_CHECKING, cast, Dict, Optional
 from typing_extensions import NotRequired, TypedDict
 
 from abc import abstractmethod, ABC
@@ -13,6 +13,7 @@ from airflow.utils.session import provide_session
 from airflow.utils.log.logging_mixin import LoggingMixin
 
 if TYPE_CHECKING:
+    from airflow.models.taskinstance import TaskInstanceKey
     from sqlalchemy.orm import Session
 
 _TaskInstanceKeyDict = TypedDict(
@@ -34,12 +35,17 @@ class DRMAAJobStoreMixin(ABC):
     backend for keeping track of DRMAA jobs
     persistently across sessions
     '''
-    @abstractmethod
-    def update(self, jobs: JobTrackingType, session: Session = None):
-        raise NotImplementedError
 
     @abstractmethod
     def get_or_create(self, session: Session = None):
+        raise NotImplementedError
+
+    @abstractmethod
+    def drop_job(self, job: JobID):
+        raise NotImplementedError
+
+    @abstractmethod
+    def add_job(self, job: JobID, key: TaskInstanceKey):
         raise NotImplementedError
 
 
@@ -75,9 +81,32 @@ class VariableStore(DRMAAJobStoreMixin, LoggingMixin):
 
         return value
 
+    def add_job(self, job_id: JobID, key: TaskInstanceKey):
+        key_dict = _taskkey_to_dict(key)
+        entry = {job_id: key_dict}
+        self._update(entry)
+        self.log.info("Successfully added {job_id} to `scheduler_job_ids`")
+
     @provide_session
-    def update(self, jobs: JobTrackingType, session: Session = None):
+    def _update(self, jobs: JobTrackingType, session: Session = None):
+        value = self.get_or_create()
+        value.update(jobs)
         Variable.update(self.key, jobs, serialize_json=True, session=session)
+
+    def drop_job(self, job_id: JobID):
+        value = self.get_or_create()
+        try:
+            job_details = value.pop(job_id)
+        except KeyError:
+            self.log.error(f"Failed to remove {job_id}, job was not"
+                           " being tracked by Airflow!")
+        else:
+            self._update(value)
+            to_print = "\n".join([f"{k}: {v}" for k, v in job_details.items()])
+            self.log.info(
+                f"Successfully removed {job_id} from `scheduler_job_ids` with"
+                " the following Task information:\n"
+                f"{to_print}")
 
 
 STORE_REGISTER = {"VariableStore": VariableStore}
@@ -90,3 +119,7 @@ def get_store(store_name: str, metadata={}) -> JobStoreType:
     '''
 
     return STORE_REGISTER[store_name](metadata)
+
+
+def _taskkey_to_dict(key: TaskInstanceKey) -> _TaskInstanceKeyDict:
+    return cast(_TaskInstanceKeyDict, key._asdict())
