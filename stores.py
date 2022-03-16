@@ -85,7 +85,7 @@ class VariableStore(DRMAAJobStoreMixin, LoggingMixin):
         key_dict = _taskkey_to_dict(key)
         entry = {job_id: key_dict}
         self._update(entry)
-        self.log.info("Successfully added {job_id} to `scheduler_job_ids`")
+        self.log.info(f"Successfully added {job_id} to `{self.key}`")
 
     @provide_session
     def _update(self, jobs: JobTrackingType, session: Session = None):
@@ -104,7 +104,7 @@ class VariableStore(DRMAAJobStoreMixin, LoggingMixin):
             self._update(value)
             to_print = "\n".join([f"{k}: {v}" for k, v in job_details.items()])
             self.log.info(
-                f"Successfully removed {job_id} from `scheduler_job_ids` with"
+                f"Successfully removed {job_id} from `{self.key}` with"
                 " the following Task information:\n"
                 f"{to_print}")
 
