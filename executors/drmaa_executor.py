@@ -2,10 +2,8 @@ from __future__ import annotations
 import drmaa
 from drmaa_executor_plugin.drmaa_patches import PatchedSession as drmaaSession
 
-from typing import (TYPE_CHECKING, Optional, Generator, Dict, cast, Callable,
-                    TypeVar, Any)
-
-from typing_extensions import NotRequired, TypedDict
+from typing import (TYPE_CHECKING, Optional, Generator, cast, Callable,
+                    TypeVar)
 
 from functools import wraps
 
@@ -13,15 +11,17 @@ from airflow.executors.base_executor import BaseExecutor, NOT_STARTED_MESSAGE
 from airflow.exceptions import AirflowException
 
 import drmaa_executor_plugin.config_adapters as adapters
+import drmaa_executor_plugin.stores as drmaa_stores
+
 from airflow.utils.log.logging_mixin import LoggingMixin
-from airflow.utils.session import provide_session
 from airflow.utils.state import State
-from airflow.models import Variable
+from airflow.configuration import conf
 
 if TYPE_CHECKING:
     from airflow.models.taskinstance import TaskInstanceKey
     from airflow.executors.base_executor import CommandType
-    from sqlalchemy.orm import Session
+    from drmaa_executor_plugin.stores import (JobStoreType,
+                                              _TaskInstanceKeyDict, JobID)
 
 JOB_STATE_MAP = {
     drmaa.JobState.QUEUED_ACTIVE: State.QUEUED,
@@ -30,19 +30,7 @@ JOB_STATE_MAP = {
     drmaa.JobState.FAILED: State.FAILED
 }
 
-
 # How to handle API breaking changes with typed dict?
-JobID = int
-_TaskInstanceKeyDict = TypedDict(
-    '_TaskInstanceKeyDict', {
-        'dag_id': str,
-        'task_id': str,
-        'run_id': NotRequired[Optional[str]],
-        'execution_date': NotRequired[Optional[str]],
-        'try_number': int
-    })
-
-JobTrackingType = Dict[JobID, _TaskInstanceKeyDict]
 
 T = TypeVar("T")
 
@@ -62,12 +50,13 @@ def check_started(method: Callable[..., T]) -> Callable[..., T]:
     return _impl
 
 
-# TODO: Create JobTracker helper class
-# TODO: Decouple backend (Variable) via dependency injection, does Airflow allow this?
 class DRMAAV1Executor(BaseExecutor, LoggingMixin):
     """
     Submit jobs to an HPC cluster using the DRMAA v1 API
     """
+
+    drmaa_section = 'drmaa'
+
     def __init__(self,
                  max_concurrent_jobs: Optional[int] = None,
                  parallelism: int = 0):
@@ -79,64 +68,39 @@ class DRMAAV1Executor(BaseExecutor, LoggingMixin):
         # Not yet implemented
         self.max_concurrent_jobs: Optional[int] = max_concurrent_jobs
 
+        # Deal with configuration management
+        drmaa_config = conf.as_dict(display_sensitive=True)[self.drmaa_section]
+
+        # Establish Store component for persistent job tracking
+        self.store: JobStoreType = drmaa_stores.get_store(
+            drmaa_config.get("store", "VariableStore"),
+            drmaa_config.get("store_metadata", {}))
+
     def iter_scheduled_jobs(
             self) -> Generator[tuple[JobID, TaskInstanceKey], None, None]:
         '''
         Iterate over scheduled jobs
         '''
-        for job_id, instance_info in self._get_or_create_job_ids().items():
+        for job_id, instance_info in self.store.get_or_create().items():
             yield job_id, TaskInstanceKey(**instance_info)
 
     @property
     def active_jobs(self) -> int:
-        return len(self._get_or_create_job_ids())
-
-    # TODO: Make `scheduler_job_ids` configurable under [executor]
-    @provide_session
-    def _get_or_create_job_ids(self,
-                               session: Session = None) -> JobTrackingType:
-
-        current_jobs = Variable.get("scheduler_job_ids",
-                                    default_var=None,
-                                    deserialize_json=True)
-        if current_jobs is None:
-            current_jobs = {}
-            self.log.info("Setting up job tracking Airflow variable...")
-
-            # Cannot use Variable.set in Airflow < 2.2
-            session.add(
-                Variable(
-                    key="scheduler_job_ids",
-                    val="{}",
-                    description="DRMAA Scheduler Job ID tracking",
-                ))
-            session.flush()
-            self.log.info("Created `scheduler_job_ids` variable")
-
-        return current_jobs
-
-    @provide_session
-    def _update_job_tracker(self,
-                            jobs: JobTrackingType,
-                            session: Optional[Session] = None) -> None:
-        Variable.update("scheduler_job_ids",
-                        jobs,
-                        serialize_json=True,
-                        session=session)
+        return len(self.store.get_or_create())
 
     def _drop_from_tracking(self, job_id: JobID) -> None:
         self.log.info(
             f"Removing Job {job_id} from tracking variable `scheduler_job_ids`"
         )
 
-        jobs = self._get_or_create_job_ids()
+        jobs = self.store.get_or_create()
         try:
             jobs.pop(job_id)
         except KeyError:
             self.log.error(f"Failed to remove {job_id}, job was not"
                            " being tracked by Airflow!")
         else:
-            self._update_job_tracker(jobs)
+            self.store.update(jobs)
             self.log.info(
                 f"Successfully removed {job_id} from `scheduler_job_ids`")
 
@@ -148,9 +112,9 @@ class DRMAAV1Executor(BaseExecutor, LoggingMixin):
         key_dict = _taskkey_to_dict(key)
         entry = {job_id: key_dict}
 
-        current_jobs = self._get_or_create_job_ids()
+        current_jobs = self.store.get_or_create()
         current_jobs.update(entry)
-        self._update_job_tracker(current_jobs)
+        self.store.update(current_jobs)
         self.log.info("Successfully added {job_id} to `scheduler_job_ids`")
 
     def start(self) -> None:
@@ -160,7 +124,7 @@ class DRMAAV1Executor(BaseExecutor, LoggingMixin):
 
         self.log.info(
             "Getting job tracking Airflow Variable: `scheduler_job_ids`")
-        current_jobs = self._get_or_create_job_ids()
+        current_jobs = self.store.get_or_create()
 
         if current_jobs:
             print_jobs = "\n".join([f"{j_id}" for j_id in current_jobs])
