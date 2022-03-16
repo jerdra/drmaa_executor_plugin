@@ -2,8 +2,10 @@ from __future__ import annotations
 import drmaa
 from drmaa_executor_plugin.drmaa_patches import PatchedSession as drmaaSession
 
-from typing import (TYPE_CHECKING, Optional, TypedDict, Generator, Dict, cast,
-                    Callable, TypeVar, Any)
+from typing import (TYPE_CHECKING, Optional, Generator, Dict, cast, Callable,
+                    TypeVar, Any)
+
+from typing_extensions import NotRequired, TypedDict
 
 from functools import wraps
 
@@ -28,13 +30,17 @@ JOB_STATE_MAP = {
     drmaa.JobState.FAILED: State.FAILED
 }
 
+
+# How to handle API breaking changes with typed dict?
 JobID = int
-_TaskInstanceKeyDict = TypedDict('_TaskInstanceKeyDict', {
-    'dag_id': str,
-    'task_id': str,
-    'run_id': str,
-    'try_number': int
-})
+_TaskInstanceKeyDict = TypedDict(
+    '_TaskInstanceKeyDict', {
+        'dag_id': str,
+        'task_id': str,
+        'run_id': NotRequired[Optional[str]],
+        'execution_date': NotRequired[Optional[str]],
+        'try_number': int
+    })
 
 JobTrackingType = Dict[JobID, _TaskInstanceKeyDict]
 
@@ -56,15 +62,17 @@ def check_started(method: Callable[..., T]) -> Callable[..., T]:
     return _impl
 
 
-# TODO: Create JobTracker helper class?
+# TODO: Create JobTracker helper class
+# TODO: Decouple backend (Variable) via dependency injection, does Airflow allow this?
 class DRMAAV1Executor(BaseExecutor, LoggingMixin):
     """
     Submit jobs to an HPC cluster using the DRMAA v1 API
     """
-    def __init__(self, max_concurrent_jobs: Optional[int] = None):
-        super().__init__()
+    def __init__(self,
+                 max_concurrent_jobs: Optional[int] = None,
+                 parallelism: int = 0):
+        super().__init__(parallelism=parallelism)
 
-        self.active_jobs: int = 0
         self.jobs_submitted: int = 0
         self.session: Optional[drmaaSession] = None
 
@@ -83,27 +91,26 @@ class DRMAAV1Executor(BaseExecutor, LoggingMixin):
     def active_jobs(self) -> int:
         return len(self._get_or_create_job_ids())
 
-    @active_jobs.setter
-    def active_jobs(self, val):
-        self.active_jobs = val
-
     # TODO: Make `scheduler_job_ids` configurable under [executor]
     @provide_session
     def _get_or_create_job_ids(self,
-                               session: Optional[Session] = None
-                               ) -> JobTrackingType:
+                               session: Session = None) -> JobTrackingType:
 
         current_jobs = Variable.get("scheduler_job_ids",
                                     default_var=None,
                                     deserialize_json=True)
-        if not current_jobs:
+        if current_jobs is None:
             current_jobs = {}
             self.log.info("Setting up job tracking Airflow variable...")
-            Variable.set("scheduler_job_ids",
-                         current_jobs,
-                         description="Scheduler Job ID tracking",
-                         serialize_json=True,
-                         session=session)
+
+            # Cannot use Variable.set in Airflow < 2.2
+            session.add(
+                Variable(
+                    key="scheduler_job_ids",
+                    val="{}",
+                    description="DRMAA Scheduler Job ID tracking",
+                ))
+            session.flush()
             self.log.info("Created `scheduler_job_ids` variable")
 
         return current_jobs
@@ -226,9 +233,4 @@ class DRMAAV1Executor(BaseExecutor, LoggingMixin):
 
 
 def _taskkey_to_dict(key: TaskInstanceKey) -> _TaskInstanceKeyDict:
-    return {
-        "dag_id": key.dag_id,
-        "task_id": key.task_id,
-        "run_id": key.run_id,
-        "try_number": key.try_number
-    }
+    return cast(_TaskInstanceKeyDict, key._asdict())
