@@ -41,7 +41,7 @@ def check_started(method: Callable[..., T]) -> Callable[..., T]:
     '''
     @wraps(method)
     def _impl(self, *method_args, **method_kwargs):
-        if self.session is None:
+        if self.session is None or self.store is None:
             raise AirflowException(NOT_STARTED_MESSAGE)
 
         return method(self, *method_args, **method_kwargs)
@@ -63,17 +63,10 @@ class DRMAAV1Executor(BaseExecutor, LoggingMixin):
 
         self.jobs_submitted: int = 0
         self.session: Optional[drmaaSession] = None
+        self.store: Optional[JobStoreType] = None
 
         # Not yet implemented
         self.max_concurrent_jobs: Optional[int] = max_concurrent_jobs
-
-        # Deal with configuration management
-        drmaa_config = conf.as_dict(display_sensitive=True)[self.drmaa_section]
-
-        # Establish Store component for persistent job tracking
-        self.store: JobStoreType = drmaa_stores.get_store(
-            drmaa_config.get("store", "VariableStore"),
-            drmaa_config.get("store_metadata", {}))
 
     def iter_scheduled_jobs(
             self) -> Generator[tuple[JobID, TaskInstanceKey], None, None]:
@@ -89,8 +82,18 @@ class DRMAAV1Executor(BaseExecutor, LoggingMixin):
 
     def start(self) -> None:
         self.log.info("Initializing DRMAA session")
-        self.session = drmaaSession()
-        self.session.initialize()
+
+        if self.session is None:
+            self.session = drmaaSession()
+            self.session.initialize()
+
+        if self.store is None:
+            self.log.info("Initializing backend store for job tracking")
+            drmaa_config = conf.as_dict(
+                display_sensitive=True)[self.drmaa_section]
+            self.store = drmaa_stores.get_store(
+                drmaa_config.get("store", "VariableStore"),
+                drmaa_config.get("store_metadata", {}))
 
         self.log.info(
             "Getting job tracking Airflow Variable: `scheduler_job_ids`")
