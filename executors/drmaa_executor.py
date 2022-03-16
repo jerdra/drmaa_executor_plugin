@@ -20,8 +20,7 @@ from airflow.configuration import conf
 if TYPE_CHECKING:
     from airflow.models.taskinstance import TaskInstanceKey
     from airflow.executors.base_executor import CommandType
-    from drmaa_executor_plugin.stores import (JobStoreType,
-                                              _TaskInstanceKeyDict, JobID)
+    from drmaa_executor_plugin.stores import JobStoreType, JobID
 
 JOB_STATE_MAP = {
     drmaa.JobState.QUEUED_ACTIVE: State.QUEUED,
@@ -88,35 +87,6 @@ class DRMAAV1Executor(BaseExecutor, LoggingMixin):
     def active_jobs(self) -> int:
         return len(self.store.get_or_create())
 
-    def _drop_from_tracking(self, job_id: JobID) -> None:
-        self.log.info(
-            f"Removing Job {job_id} from tracking variable `scheduler_job_ids`"
-        )
-
-        jobs = self.store.get_or_create()
-        try:
-            jobs.pop(job_id)
-        except KeyError:
-            self.log.error(f"Failed to remove {job_id}, job was not"
-                           " being tracked by Airflow!")
-        else:
-            self.store.update(jobs)
-            self.log.info(
-                f"Successfully removed {job_id} from `scheduler_job_ids`")
-
-    def _push_to_tracking(self, job_id: JobID, key: TaskInstanceKey) -> None:
-        self.log.info(
-            "Adding Job {job_id} to tracking variable `scheduler_job_ids`")
-
-        # Convert TaskInstanceKey to serializable form
-        key_dict = _taskkey_to_dict(key)
-        entry = {job_id: key_dict}
-
-        current_jobs = self.store.get_or_create()
-        current_jobs.update(entry)
-        self.store.update(current_jobs)
-        self.log.info("Successfully added {job_id} to `scheduler_job_ids`")
-
     def start(self) -> None:
         self.log.info("Initializing DRMAA session")
         self.session = drmaaSession()
@@ -162,7 +132,7 @@ class DRMAAV1Executor(BaseExecutor, LoggingMixin):
             else:
                 # Need taskinstancekey
                 self.change_state(task_instance_key, status)
-                self._drop_from_tracking(job_id)
+                self.store.drop_job(job_id)
 
     @check_started
     def execute_async(self,
@@ -188,13 +158,9 @@ class DRMAAV1Executor(BaseExecutor, LoggingMixin):
         job_id = self.session.runJob(jt)
 
         self.log.info(f"Submitted Job {job_id}")
-        self._push_to_tracking(job_id, key)
+        self.store.add_job(job_id, key)
 
         # Prevent memory leaks on C back-end, running jobs unaffected
         # https://drmaa-python.readthedocs.io/en/latest/drmaa.html
         self.session.deleteJobTemplate(jt)
         self.jobs_submitted += 1
-
-
-def _taskkey_to_dict(key: TaskInstanceKey) -> _TaskInstanceKeyDict:
-    return cast(_TaskInstanceKeyDict, key._asdict())
