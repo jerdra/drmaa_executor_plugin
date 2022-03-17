@@ -1,9 +1,8 @@
 from __future__ import annotations
-import drmaa
+import drmaa  # type: ignore
 from drmaa_executor_plugin.drmaa_patches import PatchedSession as drmaaSession
 
-from typing import (TYPE_CHECKING, Optional, Generator, cast, Callable,
-                    TypeVar)
+from typing import (TYPE_CHECKING, Optional, Generator, Callable, TypeVar)
 
 from functools import wraps
 
@@ -16,9 +15,9 @@ import drmaa_executor_plugin.stores as drmaa_stores
 from airflow.utils.log.logging_mixin import LoggingMixin
 from airflow.utils.state import State
 from airflow.configuration import conf
+from airflow.models.taskinstance import TaskInstanceKey
 
 if TYPE_CHECKING:
-    from airflow.models.taskinstance import TaskInstanceKey
     from airflow.executors.base_executor import CommandType
     from drmaa_executor_plugin.stores import JobStoreType, JobID
 
@@ -73,12 +72,12 @@ class DRMAAV1Executor(BaseExecutor, LoggingMixin):
         '''
         Iterate over scheduled jobs
         '''
-        for job_id, instance_info in self.store.get_or_create().items():
-            yield job_id, TaskInstanceKey(**instance_info)
+        for job_id, instance_key in self.store.get_or_create().items():
+            yield job_id, instance_key
 
     @property
     def active_jobs(self) -> int:
-        return len(self.store.get_or_create())
+        return len(self.store.get_or_create().keys())
 
     def start(self) -> None:
         self.log.info("Initializing DRMAA session")
