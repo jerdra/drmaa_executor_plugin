@@ -2,6 +2,7 @@
 Back-end stores for tracking persistent active job state
 for DRMAA Executor
 '''
+from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast, Dict, Optional
 from typing_extensions import NotRequired, TypedDict
