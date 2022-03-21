@@ -21,3 +21,21 @@ Using `drmaa_executor_plugin` requires the user to set up the [drmaa](https://gi
 pip install drmaa
 EXPORT DRMAA_LIBRARY_PATH=/path/to/libdrmaa.so.x
 ```
+
+# Using with Airflow
+
+In `airflow.cfg` define:
+
+```
+[core]
+
+# Airflow < 2.0
+executor = drmaa_executors.DRMAAV1Executor
+
+# Airflow >= 2.0
+# See:
+# https://github.com/apache/airflow/blob/2.0.0/UPDATING.md#custom-executors-is-loaded-using-full-import-path
+
+executor = drmaa_executor_plugin.executors.drmaa_executor.DRMAAV1Executor
+
+```
