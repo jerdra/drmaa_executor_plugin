@@ -7,8 +7,8 @@ from airflow.models.baseoperator import BaseOperator
 from airflow.executors.base_executor import BaseExecutor
 
 
-class drmaa_executor_plugin(AirflowPlugin):
-    name = "drmaa_executor_plugin"
+class DRMAAExecutorPlugin(AirflowPlugin):
+    name = "drmaa_executors"
     executors: List[Type[BaseExecutor]] = [DRMAAV1Executor]
     hooks: List[BaseHook] = []
     operators: List[BaseOperator] = []
