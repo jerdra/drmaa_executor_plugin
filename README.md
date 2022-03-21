@@ -36,6 +36,6 @@ executor = drmaa_executors.DRMAAV1Executor
 # See:
 # https://github.com/apache/airflow/blob/2.0.0/UPDATING.md#custom-executors-is-loaded-using-full-import-path
 
-executor = drmaa_executor_plugin.executors.drmaa_executor.DRMAAV1Executor
+executor = drmaa_executor_plugin.executors.DRMAAV1Executor
 
 ```
