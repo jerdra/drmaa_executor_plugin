@@ -105,6 +105,8 @@ class DRMAAV1Executor(BaseExecutor, LoggingMixin):
                         "jobName": "airflow-scheduled",
                         "hardWallclockTimeLimit": "1:00",
                     }))
+            self.log.info("Default settings:")
+            self.log.info(f"{self.default_executor_config}")
 
         self.log.info(
             "Getting job tracking Airflow Variable: `scheduler_job_ids`")
@@ -159,6 +161,9 @@ class DRMAAV1Executor(BaseExecutor, LoggingMixin):
         executor_config is empty dict by default, it'll be filled with
         default values if not specified
         '''
+        if not executor_config and self.default_executor_config is not None:
+            self.log.info("No executor config provided, using defaults")
+            executor_config = self.default_executor_config
 
         self.log.info(f"Submitting job {key} with command {command} with"
                       f" configuration options:\n{executor_config})")
