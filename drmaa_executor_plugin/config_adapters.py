@@ -3,7 +3,7 @@ Configuration adapters for mapping native specifications from DRM to DRMAA API
 """
 
 from __future__ import annotations
-from typing import (List, ClassVar, Union, Optional, TYPE_CHECKING, Bool)
+from typing import (List, ClassVar, Union, Optional, TYPE_CHECKING)
 
 from dataclasses import dataclass, asdict, fields, InitVar
 from abc import ABC, abstractmethod
@@ -95,7 +95,7 @@ class DRMAACompatible(ABC):
 class DRMAAConfig(DRMAACompatible):
 
     remoteCommand: str
-    blockEmail: Optional[Bool] = False
+    blockEmail: Optional[bool] = False
 
     args: Optional[List[str]] = None
 
