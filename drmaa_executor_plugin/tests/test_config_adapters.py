@@ -25,13 +25,13 @@ def test_slurm_config_transforms_to_drmaa(job_template):
 
     error = "TEST_VALUE"
     output = "TEST_VALUE"
-    time = "10:00:00"  # must test as seconds
+    time = "10:00:00"
     job_name = "FAKE_JOB"
 
     expected_drmaa_attrs = {
         "errorPath": error,
         "outputPath": output,
-        "hardWallclockTimeLimit": 36000,
+        "hardWallclockTimeLimit": "10:00:00",
         "jobName": job_name
     }
 
@@ -54,7 +54,7 @@ def test_slurm_config_native_spec_transforms_correctly(job_template):
     '''
 
     job_name = "TEST"
-    time = "1:00"
+    time = "01:00"
     account = "TEST"
     cpus_per_task = 5
     slurm_config = SlurmConfig(job_name=job_name,

@@ -3,10 +3,11 @@ Configuration adapters for mapping native specifications from DRM to DRMAA API
 """
 
 from __future__ import annotations
-from typing import (Dict, List, ClassVar, Union, Any, Optional, TYPE_CHECKING)
+from typing import (List, ClassVar, Union, Optional, TYPE_CHECKING)
 
 from dataclasses import dataclass, asdict, fields, InitVar
 from abc import ABC, abstractmethod
+import re
 
 if TYPE_CHECKING:
     from drmaa import JobTemplate
@@ -18,6 +19,8 @@ DRMAA_FIELDS = [
     "jobName", "outputPath", "workingDirectory", "transferFiles",
     "remoteCommand", "args", "jobName", "jobCategory", "blockEmail"
 ]
+
+TIMESTR_VALIDATE = re.compile("^(\\d+:)?[0-9][0-9]:[0-9][0-9]$")
 
 
 @dataclass
@@ -33,7 +36,7 @@ class DRMAACompatible(ABC):
             the corresponding native specification
     '''
 
-    _mapped_fields: ClassVar[Dict[str, Any]]
+    _mapped_fields: ClassVar[List[str]]
 
     def __str__(self):
         '''
@@ -72,34 +75,20 @@ class DRMAACompatible(ABC):
         Build native specification from DRM-specific fields
         '''
 
-    def _map_fields(self, **drm_kwargs: Dict[str, Any]):
-        '''
-        Transform fields in `_mapped_fields` to
-        DRMAA-compliant specification. Adds
-        DRM-specific attributes to `self`
-
-        Arguments:
-            drm_kwargs: DRM-specific key-value pairs
-        '''
-        for drm_name, value in drm_kwargs.items():
-            try:
-                drmaa_name = self._mapped_fields[drm_name]
-            except KeyError:
-                raise AttributeError(
-                    "Malformed adapter class! Cannot map field"
-                    f"{drm_name} to a DRMAA-compliant field")
-
-            setattr(self, drmaa_name, value)
-
-    def __post_init__(self, **kwargs):
-        self._map_fields(**kwargs)
-
     def _native_fields(self):
         return [
             f for f in asdict(self).keys()
-            if (f not in self._mapped_fields.keys()) and (
-                f not in DRMAA_FIELDS)
+            if (f not in self._mapped_fields) and (f not in DRMAA_FIELDS)
         ]
+
+    def set_fields(self, **drmaa_kwargs):
+        for field, value in drmaa_kwargs.items():
+            if field not in DRMAA_FIELDS:
+                raise AttributeError(
+                    "Malformed adapter class! Cannot map field"
+                    f" {field} to a DRMAA-compliant field")
+
+            setattr(self, field, value)
 
 
 @dataclass
@@ -118,11 +107,8 @@ class SlurmConfig(DRMAACompatible):
         details
     '''
 
-    _mapped_fields: ClassVar[Dict[str, Any]] = {
-        "error": "errorPath",
-        "output": "outputPath",
-        "job_name": "jobName",
-        "time": "hardWallclockTimeLimit"
+    _mapped_fields: ClassVar[List[str]] = {
+        "error", "output", "job_name", "time"
     }
 
     job_name: InitVar[str]
@@ -161,13 +147,18 @@ class SlurmConfig(DRMAACompatible):
     def __post_init__(self, job_name, time, error, output):
         '''
         Transform Union[List[str]] --> comma-delimited str
-        In addition map time to seconds
         '''
 
-        super().__post_init__(job_name=job_name,
-                              time=_timestr_to_sec(time),
-                              error=error,
-                              output=output)
+        _validate_timestr(time, "time")
+        super().set_fields(jobName=job_name,
+                           hardWallclockTimeLimit=time,
+                           errorPath=error,
+                           outputPath=output)
+
+        self.job_name = job_name
+        self.time = time
+        self.error = error
+        self.output = output
 
         for field in fields(self):
             value = getattr(self, field.name)
@@ -214,3 +205,22 @@ def _timestr_to_sec(timestr: str) -> int:
         seconds += int(unit) * (60**exp)
 
     return seconds
+
+
+def _validate_timestr(timestr: str, field_name: str) -> str:
+    '''
+    Validate timestring to make sure it meets
+    expected format.
+    '''
+
+    if not isinstance(timestr, str):
+        raise TypeError(f"Expected {field_name} to be of type string "
+                        f"but received {type(timestr)}!")
+
+    result = TIMESTR_VALIDATE.match(timestr)
+    if not result:
+        raise ValueError(f"Expected {field_name} to be of format "
+                         "X...XX:XX:XX or XX:XX! "
+                         f"but received {timestr}")
+
+    return timestr
