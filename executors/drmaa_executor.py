@@ -1,9 +1,8 @@
 from __future__ import annotations
-import drmaa
+import drmaa  # type: ignore
 from drmaa_executor_plugin.drmaa_patches import PatchedSession as drmaaSession
 
-from typing import (TYPE_CHECKING, Optional, TypedDict, Generator, Dict, cast,
-                    Callable, TypeVar, Any)
+from typing import (TYPE_CHECKING, Optional, Generator, Callable, TypeVar)
 
 from functools import wraps
 
@@ -11,15 +10,16 @@ from airflow.executors.base_executor import BaseExecutor, NOT_STARTED_MESSAGE
 from airflow.exceptions import AirflowException
 
 import drmaa_executor_plugin.config_adapters as adapters
+import drmaa_executor_plugin.stores as drmaa_stores
+
 from airflow.utils.log.logging_mixin import LoggingMixin
-from airflow.utils.session import provide_session
 from airflow.utils.state import State
-from airflow.models import Variable
+from airflow.configuration import conf
+from airflow.models.taskinstance import TaskInstanceKey
 
 if TYPE_CHECKING:
-    from airflow.models.taskinstance import TaskInstanceKey
     from airflow.executors.base_executor import CommandType
-    from sqlalchemy.orm import Session
+    from drmaa_executor_plugin.stores import JobStoreType, JobID
 
 JOB_STATE_MAP = {
     drmaa.JobState.QUEUED_ACTIVE: State.QUEUED,
@@ -28,15 +28,7 @@ JOB_STATE_MAP = {
     drmaa.JobState.FAILED: State.FAILED
 }
 
-JobID = int
-_TaskInstanceKeyDict = TypedDict('_TaskInstanceKeyDict', {
-    'dag_id': str,
-    'task_id': str,
-    'run_id': str,
-    'try_number': int
-})
-
-JobTrackingType = Dict[JobID, _TaskInstanceKeyDict]
+# How to handle API breaking changes with typed dict?
 
 T = TypeVar("T")
 
@@ -48,7 +40,7 @@ def check_started(method: Callable[..., T]) -> Callable[..., T]:
     '''
     @wraps(method)
     def _impl(self, *method_args, **method_kwargs):
-        if self.session is None:
+        if self.session is None or self.store is None:
             raise AirflowException(NOT_STARTED_MESSAGE)
 
         return method(self, *method_args, **method_kwargs)
@@ -56,17 +48,21 @@ def check_started(method: Callable[..., T]) -> Callable[..., T]:
     return _impl
 
 
-# TODO: Create JobTracker helper class?
 class DRMAAV1Executor(BaseExecutor, LoggingMixin):
     """
     Submit jobs to an HPC cluster using the DRMAA v1 API
     """
-    def __init__(self, max_concurrent_jobs: Optional[int] = None):
-        super().__init__()
 
-        self.active_jobs: int = 0
+    drmaa_section = 'drmaa'
+
+    def __init__(self,
+                 max_concurrent_jobs: Optional[int] = None,
+                 parallelism: int = 0):
+        super().__init__(parallelism=parallelism)
+
         self.jobs_submitted: int = 0
         self.session: Optional[drmaaSession] = None
+        self.store: Optional[JobStoreType] = None
 
         # Not yet implemented
         self.max_concurrent_jobs: Optional[int] = max_concurrent_jobs
@@ -76,84 +72,31 @@ class DRMAAV1Executor(BaseExecutor, LoggingMixin):
         '''
         Iterate over scheduled jobs
         '''
-        for job_id, instance_info in self._get_or_create_job_ids().items():
-            yield job_id, TaskInstanceKey(**instance_info)
+        for job_id, instance_key in self.store.get_or_create().items():
+            yield job_id, instance_key
 
     @property
     def active_jobs(self) -> int:
-        return len(self._get_or_create_job_ids())
-
-    @active_jobs.setter
-    def active_jobs(self, val):
-        self.active_jobs = val
-
-    # TODO: Make `scheduler_job_ids` configurable under [executor]
-    @provide_session
-    def _get_or_create_job_ids(self,
-                               session: Optional[Session] = None
-                               ) -> JobTrackingType:
-
-        current_jobs = Variable.get("scheduler_job_ids",
-                                    default_var=None,
-                                    deserialize_json=True)
-        if not current_jobs:
-            current_jobs = {}
-            self.log.info("Setting up job tracking Airflow variable...")
-            Variable.set("scheduler_job_ids",
-                         current_jobs,
-                         description="Scheduler Job ID tracking",
-                         serialize_json=True,
-                         session=session)
-            self.log.info("Created `scheduler_job_ids` variable")
-
-        return current_jobs
-
-    @provide_session
-    def _update_job_tracker(self,
-                            jobs: JobTrackingType,
-                            session: Optional[Session] = None) -> None:
-        Variable.update("scheduler_job_ids",
-                        jobs,
-                        serialize_json=True,
-                        session=session)
-
-    def _drop_from_tracking(self, job_id: JobID) -> None:
-        self.log.info(
-            f"Removing Job {job_id} from tracking variable `scheduler_job_ids`"
-        )
-
-        jobs = self._get_or_create_job_ids()
-        try:
-            jobs.pop(job_id)
-        except KeyError:
-            self.log.error(f"Failed to remove {job_id}, job was not"
-                           " being tracked by Airflow!")
-        else:
-            self._update_job_tracker(jobs)
-            self.log.info(
-                f"Successfully removed {job_id} from `scheduler_job_ids`")
-
-    def _push_to_tracking(self, job_id: JobID, key: TaskInstanceKey) -> None:
-        self.log.info(
-            "Adding Job {job_id} to tracking variable `scheduler_job_ids`")
-
-        # Convert TaskInstanceKey to serializable form
-        key_dict = _taskkey_to_dict(key)
-        entry = {job_id: key_dict}
-
-        current_jobs = self._get_or_create_job_ids()
-        current_jobs.update(entry)
-        self._update_job_tracker(current_jobs)
-        self.log.info("Successfully added {job_id} to `scheduler_job_ids`")
+        return len(self.store.get_or_create().keys())
 
     def start(self) -> None:
         self.log.info("Initializing DRMAA session")
-        self.session = drmaaSession()
-        self.session.initialize()
+
+        if self.session is None:
+            self.session = drmaaSession()
+            self.session.initialize()
+
+        if self.store is None:
+            self.log.info("Initializing backend store for job tracking")
+            drmaa_config = conf.as_dict(display_sensitive=True).get(
+                self.drmaa_section, {})
+            self.store = drmaa_stores.get_store(
+                drmaa_config.get("store", "VariableStore"),
+                drmaa_config.get("store_metadata", {}))
 
         self.log.info(
             "Getting job tracking Airflow Variable: `scheduler_job_ids`")
-        current_jobs = self._get_or_create_job_ids()
+        current_jobs = self.store.get_or_create()
 
         if current_jobs:
             print_jobs = "\n".join([f"{j_id}" for j_id in current_jobs])
@@ -191,7 +134,7 @@ class DRMAAV1Executor(BaseExecutor, LoggingMixin):
             else:
                 # Need taskinstancekey
                 self.change_state(task_instance_key, status)
-                self._drop_from_tracking(job_id)
+                self.store.drop_job(job_id)
 
     @check_started
     def execute_async(self,
@@ -217,18 +160,9 @@ class DRMAAV1Executor(BaseExecutor, LoggingMixin):
         job_id = self.session.runJob(jt)
 
         self.log.info(f"Submitted Job {job_id}")
-        self._push_to_tracking(job_id, key)
+        self.store.add_job(job_id, key)
 
         # Prevent memory leaks on C back-end, running jobs unaffected
         # https://drmaa-python.readthedocs.io/en/latest/drmaa.html
         self.session.deleteJobTemplate(jt)
         self.jobs_submitted += 1
-
-
-def _taskkey_to_dict(key: TaskInstanceKey) -> _TaskInstanceKeyDict:
-    return {
-        "dag_id": key.dag_id,
-        "task_id": key.task_id,
-        "run_id": key.run_id,
-        "try_number": key.try_number
-    }
