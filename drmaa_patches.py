@@ -6,6 +6,13 @@ from drmaa import JobTemplate, Session
 from drmaa.helpers import Attribute, IntConverter
 
 
+#TODO: Make sure this is actually correct?
+# Works for SLURM
+CORRECT_TO_STRING = [
+        "hardWallclockTimeLimit"
+]
+
+
 class PatchedIntConverter():
     '''
     Helper class to correctly encode Integer values
@@ -33,7 +40,9 @@ class PatchedJobTemplate(JobTemplate):
         super(PatchedJobTemplate, self).__init__()
         for attr, value in vars(JobTemplate).items():
             if isinstance(value, Attribute):
-                if value.converter is IntConverter:
+                if attr in CORRECT_TO_STRING:
+                    setattr(value, "converter", None)
+                elif value.converter is IntConverter:
                     setattr(value, "converter", PatchedIntConverter)
 
 
