@@ -2,7 +2,8 @@ from __future__ import annotations
 import drmaa  # type: ignore
 from drmaa_executor_plugin.drmaa_patches import PatchedSession as drmaaSession
 
-from typing import (TYPE_CHECKING, Optional, Generator, Callable, TypeVar)
+from typing import (TYPE_CHECKING, Optional, Generator, Callable, TypeVar,
+                    Union)
 
 from functools import wraps
 
@@ -63,6 +64,7 @@ class DRMAAV1Executor(BaseExecutor, LoggingMixin):
         self.jobs_submitted: int = 0
         self.session: Optional[drmaaSession] = None
         self.store: Optional[JobStoreType] = None
+        self.default_executor_config: Optional[adapters.DRMAACompatible] = None
 
         # Not yet implemented
         self.max_concurrent_jobs: Optional[int] = max_concurrent_jobs
@@ -86,13 +88,23 @@ class DRMAAV1Executor(BaseExecutor, LoggingMixin):
             self.session = drmaaSession()
             self.session.initialize()
 
+        drmaa_config = conf.as_dict(display_sensitive=True).get(
+            self.drmaa_section, {})
+
         if self.store is None:
             self.log.info("Initializing backend store for job tracking")
-            drmaa_config = conf.as_dict(display_sensitive=True).get(
-                self.drmaa_section, {})
             self.store = drmaa_stores.get_store(
                 drmaa_config.get("store", "VariableStore"),
                 drmaa_config.get("store_metadata", {}))
+
+        if self.default_executor_config is None:
+            self.log.info("Setting default settings for submission")
+            self.default_executor_config = adapters.DRMAAConfig(
+                **drmaa_config.get(
+                    "submit_options", {
+                        "jobName": "airflow-scheduled",
+                        "hardWallclockTimeLimit": "1:00",
+                    }))
 
         self.log.info(
             "Getting job tracking Airflow Variable: `scheduler_job_ids`")
@@ -140,10 +152,12 @@ class DRMAAV1Executor(BaseExecutor, LoggingMixin):
     def execute_async(self,
                       key: TaskInstanceKey,
                       command: CommandType,
-                      executor_config: adapters.DRMAACompatible,
+                      executor_config: Union[adapters.DRMAACompatible, dict],
                       queue: Optional[str] = None) -> None:
         '''
         Submit slurm job and track job id
+        executor_config is empty dict by default, it'll be filled with
+        default values if not specified
         '''
 
         self.log.info(f"Submitting job {key} with command {command} with"
