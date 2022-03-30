@@ -94,6 +94,8 @@ class DRMAACompatible(ABC):
 @dataclass
 class DRMAAConfig(DRMAACompatible):
 
+    _mapped_fields: ClassVar[List[str]] = []
+
     blockEmail: Optional[bool] = False
 
     args: Optional[List[str]] = None
@@ -126,9 +128,9 @@ class SlurmConfig(DRMAACompatible):
         details
     '''
 
-    _mapped_fields: ClassVar[List[str]] = {
+    _mapped_fields: ClassVar[List[str]] = [
         "error", "output", "job_name", "time"
-    }
+    ]
 
     job_name: InitVar[str]
     time: InitVar[str]
