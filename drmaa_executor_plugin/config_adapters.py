@@ -94,7 +94,6 @@ class DRMAACompatible(ABC):
 @dataclass
 class DRMAAConfig(DRMAACompatible):
 
-    remoteCommand: str
     blockEmail: Optional[bool] = False
 
     args: Optional[List[str]] = None
