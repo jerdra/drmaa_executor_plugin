@@ -3,7 +3,7 @@ Configuration adapters for mapping native specifications from DRM to DRMAA API
 """
 
 from __future__ import annotations
-from typing import (List, ClassVar, Union, Optional, TYPE_CHECKING)
+from typing import (List, ClassVar, Union, Optional, TYPE_CHECKING, Bool)
 
 from dataclasses import dataclass, asdict, fields, InitVar
 from abc import ABC, abstractmethod
@@ -93,6 +93,26 @@ class DRMAACompatible(ABC):
 
 @dataclass
 class DRMAAConfig(DRMAACompatible):
+
+    remoteCommand: str
+    blockEmail: Optional[Bool] = False
+
+    args: Optional[List[str]] = None
+
+    jobName: Optional[str] = None
+    jobCategory: Optional[str] = None
+    inputPath: Optional[str] = None
+    errorPath: Optional[str] = None
+    outputPath: Optional[str] = None
+
+    hardWallclockTimeLimit: Optional[str] = None
+    hardRunDurationLimit: Optional[int] = None
+    deadlineTime: Optional[str] = None
+
+    email: Optional[str] = None
+    workingDirectory: Optional[str] = None
+    transferFiles: Optional[str] = None
+
     def drm2drmaa(self):
         return
 
