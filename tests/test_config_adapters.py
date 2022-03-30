@@ -65,3 +65,29 @@ def test_slurm_config_native_spec_transforms_correctly(job_template):
     jt = slurm_config.get_drmaa_config(job_template)
     for spec in ['account=TEST', 'cpus-per-task=5']:
         assert spec in jt.nativeSpecification
+
+
+def test_invalid_timestr_fails():
+    job_name = "TEST"
+    time = "FAILURE"
+    account = "TEST"
+    cpus_per_task = 10
+
+    with pytest.raises(ValueError):
+        SlurmConfig(job_name=job_name,
+                    time=time,
+                    account=account,
+                    cpus_per_task=cpus_per_task)
+
+
+def test_timestr_not_string_fails():
+    job_name = "TEST"
+    time = 10
+    account = "TEST"
+    cpus_per_task = 10
+
+    with pytest.raises(TypeError):
+        SlurmConfig(job_name=job_name,
+                    time=time,
+                    account=account,
+                    cpus_per_task=cpus_per_task)
