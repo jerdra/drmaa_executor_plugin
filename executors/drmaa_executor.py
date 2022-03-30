@@ -88,8 +88,8 @@ class DRMAAV1Executor(BaseExecutor, LoggingMixin):
 
         if self.store is None:
             self.log.info("Initializing backend store for job tracking")
-            drmaa_config = conf.as_dict(
-                display_sensitive=True)[self.drmaa_section]
+            drmaa_config = conf.as_dict(display_sensitive=True).get(
+                self.drmaa_section, {})
             self.store = drmaa_stores.get_store(
                 drmaa_config.get("store", "VariableStore"),
                 drmaa_config.get("store_metadata", {}))
