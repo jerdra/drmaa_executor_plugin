@@ -74,8 +74,8 @@ class DRMAAV1Executor(BaseExecutor, LoggingMixin):
         '''
         Iterate over scheduled jobs
         '''
-        for job_id, instance_key in self.store.get_or_create().items():
-            yield job_id, instance_key
+        for job_id, instance_key_dict in self.store.get_or_create().items():
+            yield job_id, TaskInstanceKey(**instance_key_dict)
 
     @property
     def active_jobs(self) -> int:
