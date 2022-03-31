@@ -93,6 +93,27 @@ class DRMAACompatible(ABC):
 
 @dataclass
 class DRMAAConfig(DRMAACompatible):
+
+    _mapped_fields: ClassVar[List[str]] = []
+
+    blockEmail: Optional[bool] = False
+
+    args: Optional[List[str]] = None
+
+    jobName: Optional[str] = None
+    jobCategory: Optional[str] = None
+    inputPath: Optional[str] = None
+    errorPath: Optional[str] = None
+    outputPath: Optional[str] = None
+
+    hardWallclockTimeLimit: Optional[str] = None
+    hardRunDurationLimit: Optional[int] = None
+    deadlineTime: Optional[str] = None
+
+    email: Optional[str] = None
+    workingDirectory: Optional[str] = None
+    transferFiles: Optional[str] = None
+
     def drm2drmaa(self):
         return
 
@@ -107,9 +128,9 @@ class SlurmConfig(DRMAACompatible):
         details
     '''
 
-    _mapped_fields: ClassVar[List[str]] = {
+    _mapped_fields: ClassVar[List[str]] = [
         "error", "output", "job_name", "time"
-    }
+    ]
 
     job_name: InitVar[str]
     time: InitVar[str]
